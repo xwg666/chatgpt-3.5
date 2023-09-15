@@ -1,0 +1,113 @@
+import ast
+import json
+
+from requests import *
+from  flask import  Flask,render_template,request    #导入Flask类
+import openai
+import flask
+import redis
+from loguru import logger
+import  pymysql as sql
+
+app=Flask('AI问答')
+app.config['JSON_AS_ASCII'] = False#实例化并命名为app实例
+prompt=[]
+
+#本地实现上下文
+@app.route('/nkai', methods=['POST', "GET"])
+def nkai():
+    #连接redis
+    # r=redis.Redis(host='192.168.5.215', port=6380, db=0,  password='ytydn2021',decode_responses=True)
+    # pipe = r.pipeline(transaction=True)
+
+    #连接mysql
+    mysql=sql.connect(host='127.0.0.1',port=3306,password='xwg.......',user='chatgpt',database='python')
+    cursor=mysql.cursor()
+
+    userid=request.args.get('userid','')
+    question = request.args.get('question','')
+    question = str(question).strip()
+    userid= int(userid)
+    print(userid,type(userid))
+
+    messages = [{'role': 'user', "content": question}]
+    cursor.execute(f'SELECT count(1) FROM chatgpt WHERE userid = {userid}')
+    if_exists =cursor.fetchone()[0]    #获取结果
+    print(if_exists)
+    if if_exists==1:
+        try:
+            cursor.execute(f'select result from chatgpt where userid={userid}')
+            result=cursor.fetchone()[0]
+            result=json.dumps(result).replace('\n','')    #去掉其中的换行
+            result=json.loads(result)
+            result_ls=ast.literal_eval(result)
+            result_ls.append(messages[0])
+            prompt=result_ls
+        except:
+            prompt=messages
+
+
+    if if_exists==0:
+        cursor.execute(f'INSERT INTO chatgpt (userid) VALUES ("{userid}")')
+        mysql.commit()
+        prompt=messages
+    # value = r.lrange(userid, 0, -1)
+    # print(value,type(value))
+    # if value!=None:
+    #
+    #     result=[json.loads(i) for i in value]
+    #     value=result
+    #     print(value,type(value))
+    # else:
+    #     value=[]
+    # prompt=value
+    # print(prompt)
+    # real_ip = str(request.headers.get('X-Forwarded-For') or request.remote_addr)
+    # logger.info('ip: {}, stream:{}'.format(real_ip, question))
+
+    if len(prompt)>6:
+        prompt.pop(0)
+        prompt.pop(1)  #移除列表的前两个对话，保持在五轮对话
+    # prompt.append(messages[0])
+
+    openai.api_key = 'sk-oCFDLbIN3AAyKctliZhqTpxxxxxxxxxxxx'
+    rsp = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo-0613",
+        messages=prompt,
+        temperature=0.9,
+        top_p=0.7,
+        max_tokens=2000,
+        stream=True
+    )
+    def data():
+        final_text = ''
+        for info in rsp:
+            # print(info)
+            if info['choices'][0]['finish_reason'] != 'stop':
+                final_text += info['choices'][0]['delta']['content']
+                print(final_text)
+            else:
+                final_text+=' '
+                # print(final_text)
+                prompt.append({'role': 'assistant', 'content': final_text})
+                cursor.execute(f'update chatgpt set result= "{prompt}" where userid={userid}')
+                mysql.commit()
+                # prompt.append(messages[0])
+
+                # r.set(userid, str(prompt))
+                # return final_text
+
+            # yield "data: {}".format(final_text)
+            yield "data: %s\n\n" % final_text.replace('\n', '<br />')
+        cursor.close()
+        mysql.close()
+        # for x in prompt:
+        #     r.rpush(userid, json.dumps(x))
+        # print(r.get(userid))
+        # return final_text
+    print(prompt)
+    return flask.Response(data(),mimetype="text/event-stream")
+    # return data()
+
+if __name__=="__main__":
+    app.run(port=8082,host="0.0.0.0",debug=True)
