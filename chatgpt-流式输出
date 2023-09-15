@@ -17,7 +17,7 @@ prompt=[]
 @app.route('/nkai', methods=['POST', "GET"])
 def nkai():
     #连接redis
-    # r=redis.Redis(host='192.168.5.215', port=6380, db=0,  password='ytydn2021',decode_responses=True)
+    # r=redis.Redis(host='192.168.5.5', port=6380, db=0,  password='0000',decode_responses=True)
     # pipe = r.pipeline(transaction=True)
 
     #连接mysql
@@ -46,22 +46,10 @@ def nkai():
         except:
             prompt=messages
 
-
     if if_exists==0:
         cursor.execute(f'INSERT INTO chatgpt (userid) VALUES ("{userid}")')
         mysql.commit()
         prompt=messages
-    # value = r.lrange(userid, 0, -1)
-    # print(value,type(value))
-    # if value!=None:
-    #
-    #     result=[json.loads(i) for i in value]
-    #     value=result
-    #     print(value,type(value))
-    # else:
-    #     value=[]
-    # prompt=value
-    # print(prompt)
     # real_ip = str(request.headers.get('X-Forwarded-For') or request.remote_addr)
     # logger.info('ip: {}, stream:{}'.format(real_ip, question))
 
@@ -82,29 +70,19 @@ def nkai():
     def data():
         final_text = ''
         for info in rsp:
-            # print(info)
             if info['choices'][0]['finish_reason'] != 'stop':
                 final_text += info['choices'][0]['delta']['content']
                 print(final_text)
             else:
                 final_text+=' '
-                # print(final_text)
                 prompt.append({'role': 'assistant', 'content': final_text})
                 cursor.execute(f'update chatgpt set result= "{prompt}" where userid={userid}')
                 mysql.commit()
-                # prompt.append(messages[0])
-
-                # r.set(userid, str(prompt))
-                # return final_text
 
             # yield "data: {}".format(final_text)
             yield "data: %s\n\n" % final_text.replace('\n', '<br />')
         cursor.close()
         mysql.close()
-        # for x in prompt:
-        #     r.rpush(userid, json.dumps(x))
-        # print(r.get(userid))
-        # return final_text
     print(prompt)
     return flask.Response(data(),mimetype="text/event-stream")
     # return data()
