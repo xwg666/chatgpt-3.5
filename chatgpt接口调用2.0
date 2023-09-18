@@ -48,7 +48,7 @@ def text_censor(text):
 @app.route('/nkai', methods=['POST', "GET"])
 def nkai():
     #连接redis
-    # r=redis.Redis(host='192.168.5.215', port=6380, db=0,  password='ytydn2021',decode_responses=True)
+    # r=redis.Redis(host='192.168.5.215', port=6380, db=0,  password='xxxxx',decode_responses=True)
     # pipe = r.pipeline(transaction=True)
 
     userid = request.args.get('userid', '')
@@ -60,7 +60,7 @@ def nkai():
 
     #连接mysql
     try:   #可以正常连接到数据库时
-        mysql=sql.connect(host='127.0.0.1',port=3306,password='xwg31415926...',user='chatgpt',database='python')
+        mysql=sql.connect(host='127.0.0.1',port=3306,password='xxxxx',user='chatgpt',database='python')
         cursor=mysql.cursor()
         print("数据库连接成功")
         cursor.execute(f'SELECT count(1) FROM chatgpt WHERE userid = {userid}')
