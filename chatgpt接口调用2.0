@@ -1,0 +1,204 @@
+import ast
+import json
+
+import requests
+from requests import *
+from  flask import  Flask,render_template,request    #导入Flask类
+import openai
+import flask
+import redis
+from loguru import logger
+import  pymysql as sql
+
+app=Flask('AI问答')
+app.config['JSON_AS_ASCII'] = False#实例化并命名为app实例
+prompt=[]
+
+
+#使用百度文本检测
+def token():
+    url = "https://aip.baidubce.com/oauth/2.0/token?client_id=luQwsfzibN1bxxxxxxxxo&client_secret=lATxxxxxxxxxxxxxFmOU&grant_type=client_credentials"
+
+    payload = json.dumps("")
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+    token=response.json()['access_token']
+    return token
+
+def text_censor(text):
+    '''
+    文本审核接口
+    '''
+    request_url = "https://aip.baidubce.com/rest/2.0/solution/v1/text_censor/v2/user_defined"
+    params = {"text": text}
+    access_token = token()
+    request_url = request_url + "?access_token=" + access_token
+    headers = {'content-type': 'application/x-www-form-urlencoded'}
+    response = requests.post(request_url, data=params, headers=headers)
+    if response:
+        result=response.json()['conclusion']
+        print(result)
+    return result
+
+#本地实现上下文
+@app.route('/nkai', methods=['POST', "GET"])
+def nkai():
+    #连接redis
+    # r=redis.Redis(host='192.168.5.215', port=6380, db=0,  password='ytydn2021',decode_responses=True)
+    # pipe = r.pipeline(transaction=True)
+
+    userid = request.args.get('userid', '')
+    question = request.args.get('question', '')
+    question = str(question).strip()
+    userid = int(userid)
+    print(userid, type(userid))
+    messages = [{'role': 'user', "content": question}]
+
+    #连接mysql
+    try:   #可以正常连接到数据库时
+        mysql=sql.connect(host='127.0.0.1',port=3306,password='xwg31415926...',user='chatgpt',database='python')
+        cursor=mysql.cursor()
+        print("数据库连接成功")
+        cursor.execute(f'SELECT count(1) FROM chatgpt WHERE userid = {userid}')
+        if_exists =cursor.fetchone()[0]    #获取结果
+        print(if_exists)
+        if if_exists==1:
+            try:
+                cursor.execute(f'select result from chatgpt where userid={userid}')
+                result=cursor.fetchone()[0]
+                result=json.dumps(result).replace('\n','')    #去掉其中的换行
+                result=json.loads(result)
+                result_ls=ast.literal_eval(result)
+                result_ls.append(messages[0])
+                prompt=result_ls
+            except:
+                prompt=messages
+
+
+        if if_exists==0:
+            cursor.execute(f'INSERT INTO chatgpt (userid) VALUES ("{userid}")')
+            mysql.commit()
+            prompt=messages
+        # value = r.lrange(userid, 0, -1)
+        # print(value,type(value))
+        # if value!=None:
+        #
+        #     result=[json.loads(i) for i in value]
+        #     value=result
+        #     print(value,type(value))
+        # else:
+        #     value=[]
+        # prompt=value
+        # print(prompt)
+        # real_ip = str(request.headers.get('X-Forwarded-For') or request.remote_addr)
+        # logger.info('ip: {}, stream:{}'.format(real_ip, question))
+        print(len(prompt),prompt)
+
+        if len(prompt)>6:
+            prompt.pop(0)
+            prompt.pop(0)  #移除列表的前两个对话，保持在五轮对话
+        # prompt.append(messages[0])
+        print('开始调用gpt接口')
+        openai.api_key = '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'
+        rsp = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo-0613",
+            messages=prompt,
+            temperature=0.9,
+            top_p=0.7,
+            max_tokens=2048,
+            stream=True
+        )
+        print('准备写入mysql')
+        def data():
+            final_text,new_text = '',''
+            ls = ['，', '。', '？', '！', '；', ',', '.', '?', '!', ';']
+            for info in rsp:
+                # print(info)
+                if info['choices'][0]['finish_reason'] != 'stop':
+                    final_text += info['choices'][0]['delta']['content']
+                    print(final_text)
+                else:
+                    final_text=final_text.replace('"',' ')  #解决存在""在数据库中报错问题，一般在问上个问题时会有这种双引号
+                    if new_text=='':   #没有标点符号时，例如1+1=2，则进行下面处理
+                        prompt.append({'role': 'assistant', 'content': final_text})
+                        cursor.execute(f'update chatgpt set result= "{prompt}" where userid={userid}')
+                        mysql.commit()
+                        yield "data: %s\n\n" % final_text.replace('\n', '<br />')
+                    else:
+                        new_text=new_text.replace('"',' ')
+                        prompt.append({'role': 'assistant', 'content': new_text})
+                        cursor.execute(f'update chatgpt set result= "{prompt}" where userid={userid}')
+                        mysql.commit()
+                        # yield "data: %s\n\n" % new_text.replace('\n', '<br />')
+                    # prompt.append(messages[0])
+                for i in ls:
+                    if i in final_text:
+                        censor=text_censor(final_text)
+                        if censor in ['合规','疑似']:
+                            new_text += final_text
+                            print(new_text)
+                            final_text = ''
+                            # yield "data: {}".format(final_text)
+                            yield "data: %s\n\n" % new_text.replace('\n', '<br />')
+                        elif censor=='不合规':
+                            print('不合规')
+                            yield "data: %s\n\n" % "内容不合规，请重新输入"
+                            return   #这里就直接返回结束，不进行下面操作
+                    # return final_text   #非流式
+
+                # yield "data: {}".format(final_text)
+                # yield "data: %s\n\n" % final_text.replace('\n', '<br />')
+            cursor.close()
+            mysql.close()
+      
+        print('prompt',prompt)
+        return flask.Response(data(),mimetype="text/event-stream")
+        # return data()   #非流式
+
+    except:   #连接数据库失败时，i进行以下单单次对话
+        try:
+            print('连接失败,进行无上下文对话')
+            openai.api_key = 'sk-oCFDLbIN3AAyKctliZhqT3Bxxxxxxxxx'
+            rsp = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo-0613",
+                messages=messages,       #只带入一次的问话，不做上下文
+                temperature=0.9,
+                top_p=0.7,
+                max_tokens=2048,
+                stream=True
+            )
+            def data():
+                final_text,new_text = '',''
+                ls=['，','。','？','！','；',',','.','?','!',';']
+                for info in rsp:
+                    if info['choices'][0]['finish_reason'] != 'stop':
+                        final_text += info['choices'][0]['delta']['content']
+                        # print(final_text)
+                    else:
+                        if new_text == '':  # 没有标点符号时，例如1+1=2，则进行下面处理
+                            prompt.append({'role': 'assistant', 'content': final_text})
+                            yield "data: %s\n\n" % final_text.replace('\n', '<br />')
+                        else:
+                            new_text = new_text.replace('"', ' ')
+                            prompt.append({'role': 'assistant', 'content': new_text})
+                        # return final_text  # 非流式
+                    for i in ls:
+                        if  i in final_text:
+                            new_text += final_text
+                            print(new_text)
+                            final_text = ''
+                            # yield "data: {}".format(final_text)
+                            yield "data: %s\n\n" % new_text.replace('\n', '<br />')
+
+            print(messages)
+            return flask.Response(data(),mimetype="text/event-stream")
+            # return data()  # 非流式
+        except:
+            return "发生了点小问题，请重新提问！"
+
+if __name__=="__main__":
+    app.run(port=3307,host="0.0.0.0",debug=True)
