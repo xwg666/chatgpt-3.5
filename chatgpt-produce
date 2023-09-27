@@ -98,15 +98,16 @@ def nkai():
                     print(final_text)
                 else:
                     final_text = final_text.replace('"', ' ')  # 解决存在""在数据库中报错问题，一般在问上个问题时会有这种双引号
+                    ask_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     if new_text == '':  # 没有标点符号时，例如1+1=2，则进行下面处理
                         prompt.append({'role': 'assistant', 'content': final_text})
-                        cursor.execute(f'update produce set result= "{prompt}" where userid={userid}')
+                        cursor.execute(f'update produce set result= "{prompt}",ask_date= "{ask_date}" where userid={userid}')
                         mysql.commit()
                         yield "data: %s\n\n" % final_text.replace('\n', '<br />')
                     else:
                         new_text = new_text.replace('"', ' ')
                         prompt.append({'role': 'assistant', 'content': new_text})
-                        cursor.execute(f'update produce set result= "{prompt}" where userid={userid}')
+                        cursor.execute(f'update produce set result= "{prompt}",ask_date= "{ask_date}" where userid={userid}')
                         mysql.commit()
                         # yield "data: %s\n\n" % new_text.replace('\n', '<br />')
                     # prompt.append(messages[0])
