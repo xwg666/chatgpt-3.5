@@ -1,0 +1,48 @@
+import datetime
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
+device = "cuda" # the device to load the model onto
+
+model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen2-1.5B-Instruct",
+    torch_dtype="auto",
+    device_map="auto",
+    cache_dir="D:\PyCharm Community Edition 2024.1.4\data\pythonProject\model",
+)
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-1.5B-Instruct",cache_dir="D:\PyCharm Community Edition 2024.1.4\data\pythonProject\model")
+
+ls=[]
+def chat():
+    while True:
+        print(ls)
+        prompt=input(f"请输入>>> ")
+        start=datetime.datetime.now()
+        print(f"<<<【开始时间：{start}】>>> ")
+        messages = [
+            # {"role": "system", "content": "你是一个有用的助手。"},
+            {"role": "user", "content": prompt}
+        ]
+        ls.append(messages[0])
+        text = tokenizer.apply_chat_template(
+            ls[-3:],
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        model_inputs = tokenizer([text], return_tensors="pt").to(device)
+
+        generated_ids = model.generate(
+            model_inputs.input_ids,
+            max_new_tokens=512
+        )
+        generated_ids = [
+            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+        ]
+
+        response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        ls.append({"role": "assistant", "content": response})
+        end=datetime.datetime.now()
+        print(response+'\n'+f"<<<【结束时间：{end}】>>> ")
+        print('耗时:'+str(end-start))
+
+if __name__ == "__main__":
+    chat()
